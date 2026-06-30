@@ -1,213 +1,82 @@
-<!DOCTYPE html>
-<html lang="ru">
+<!doctype html>
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Эго-Сфера</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0b0f19; color: #fff; overflow: hidden; font-family: sans-serif; }
-        canvas { display: block; background: radial-gradient(circle, #1a1c2e 0%, #080911 100%); }
-    </style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EGOSPHERE DEBUG</title>
+  <style>
+    body{background:#0b0f19;color:#fff;font-family:Arial,sans-serif;padding:16px}
+    .ok{color:#7CFF9A} .err{color:#FF7C7C} pre{background:#0f1320;padding:12px;border-radius:8px;overflow:auto}
+  </style>
 </head>
-<body class="flex flex-col items-center justify-between h-screen p-4">
+<body>
+  <h2>EGOSPHERE — DEBUG MODE</h2>
+  <div id="log"></div>
 
-    <!-- Хедер с подключением кошелька -->
-    <div class="w-full max-w-md flex justify-between items-center bg-gray-900/80 p-3 rounded-xl border border-purple-500/30">
-        <h1 class="text-xs text-purple-400 font-bold tracking-widest uppercase">Эго-Сфера</h1>
-        <div id="ton-connect-button"></div>
-    </div>
+  <script>
+    const LOG = (t, cls='')=>{
+      const el = document.createElement('div'); el.innerHTML = `<b>${new Date().toISOString()}</b> — ${t}`;
+      if(cls) el.className = cls;
+      document.getElementById('log').appendChild(el);
+      console.log(t);
+    };
 
-    <!-- Интерактивный холст -->
-    <canvas id="sphereCanvas" class="w-full max-w-md h-96 rounded-2xl border border-gray-800 my-4 shadow-2xl shadow-purple-500/10"></canvas>
+    (async function runDebug(){
+      LOG('1) Скрипт загружен');
 
-    <!-- Панель управления покупкой -->
-    <div id="controlPanel" class="w-full max-w-md bg-gray-900/90 p-4 rounded-2xl border border-purple-500/50 hidden">
-        <h3 class="text-sm font-bold text-center mb-2 text-purple-400">ЗАХВАТИТЬ ЭТО МЕСТО</h3>
-        <input id="dotText" type="text" placeholder="Твое послание миру (макс 30 симв)..." maxlength="30" class="w-full bg-gray-800 p-2 rounded-lg text-sm mb-2 border border-gray-700 focus:outline-none focus:border-purple-500 text-white">
-        
-        <div class="flex gap-2 mb-3">
-            <input id="dotColor" type="color" value="#a855f7" class="h-10 w-12 bg-transparent cursor-pointer rounded">
-            <div class="flex-1 flex justify-between items-center bg-gray-800 px-3 rounded-lg">
-                <span class="text-xs text-gray-400">Размер (Цена): <span id="priceLabel">0.040</span> TON</span>
-                <input id="dotSize" type="range" min="10" max="40" value="20" class="w-24 accent-purple-500">
-            </div>
-        </div>
+      // 2) Проверим, что ты вставил адрес кошелька корректно
+      const WAL = "UQCU-ZQzluQ1Vb0JNVnvTpgsHfFpFEafqC8uWN70P-FL5-eC"; // <- убедись, что это твой адрес
+      if(!WAL || WAL.length < 10){
+        LOG('Ошибка: MY_OWNER_WALLET_ADDRESS не задан или слишком короткий', 'err'); return;
+      }
+      LOG('2) WAL address looks ok: ' + WAL);
 
-        <button onclick="sendPayment()" class="w-full bg-purple-600 hover:bg-purple-700 font-bold py-2.5 rounded-xl transition-all duration-300 transform active:scale-95 shadow-lg shadow-purple-600/30">
-            Оплатить & Опубликовать
-        </button>
-    </div>
+      // 3) Проверим доступ к TON API (simple GET)
+      const apiURL = `https://testnet.tonapi.io/v2/blockchain/accounts/${WAL}/transactions?limit=3`;
+      LOG('3) Попытка fetch -> ' + apiURL);
+      try{
+        const r = await fetch(apiURL);
+        LOG('fetch status: ' + r.status + ' ('+ r.statusText +')');
+        const json = await r.json();
+        LOG('fetch ok, transactions length: ' + (json.transactions ? json.transactions.length : 'no field'));
+        const pretty = document.createElement('pre'); pretty.textContent = JSON.stringify(json.transactions ? json.transactions.slice(0,3) : json, null, 2);
+        document.getElementById('log').appendChild(pretty);
+      }catch(e){
+        LOG('Ошибка fetch к TON API: ' + e.message, 'err');
+      }
 
-    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
-    <script>
-        // === НАСТРОЙКИ: ЗАМЕНИ ЭТОТ АДРЕС ===
-        const MY_OWNER_WALLET_ADDRESS = "UQCU-ZQzluQ1Vb0JNVnvTpgsHfFpFEafqC8uWN70P-FL5-eC"; // СЮДА ВСТАВЬ СВОЙ АДРЕС TESTNET-КОШЕЛЬКА
-        // ===================================
+      // 4) Проверим наличие TonConnectUI (скрипт внешней библиотеки)
+      LOG('4) Проверяем window.TONConnectUI...');
+      if(window.TONConnectUI){
+        LOG('TONConnectUI найден', 'ok');
+      } else {
+        LOG('TONConnectUI НЕ найден. Попытаемся загрузить скрипт динамически.', 'err');
+        try {
+          await new Promise((res, rej)=>{
+            const s = document.createElement('script');
+            s.src = 'https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js';
+            s.onload = ()=>{ LOG('Динамически загружен tonconnect-ui', 'ok'); res(); };
+            s.onerror = ()=>{ LOG('Не удалось загрузить tonconnect-ui (network/CSP?)', 'err'); rej(); };
+            document.head.appendChild(s);
+          });
+        } catch(e) { LOG('Ошибка при динамической загрузке: ' + e, 'err'); }
+      }
 
-        const tg = window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
-
-        const canvas = document.getElementById('sphereCanvas');
-        const ctx = canvas.getContext('2d');
-        let dots = [];
-        let selectedCoords = null;
-
-        const tonConnectUI = new TONConnectUI.TonConnectUI({
-            manifestUrl: 'https://raw.githubusercontent.com/ton-community/tutorials/main/03-client/test/public/tonconnect-manifest.json', // Можно использовать любой валидный манифест
-            buttonRootId: 'ton-connect-button'
-        });
-
-        const dotSizeInput = document.getElementById('dotSize');
-        dotSizeInput.addEventListener('input', () => {
-            const size = parseFloat(dotSizeInput.value);
-            // Цена: 0.002 TON за 1 единицу размера (например, размер 20 = 0.04 TON)
-            document.getElementById('priceLabel').innerText = (size * 0.002).toFixed(3); 
-        });
-
-        // Загрузка "Базы данных" из блокчейна (история транзакций твоего кошелька)
-        async function loadBlockchainData() {
-            try {
-                // Используем TON API для получения транзакций на адрес твоего кошелька
-                const response = await fetch(`https://testnet.tonapi.io/v2/blockchain/accounts/${MY_OWNER_WALLET_ADDRESS}/transactions?limit=100`);
-                const data = await response.json();
-                
-                let parsedDots = [];
-
-                data.transactions.forEach(tx => {
-                    const inMsg = tx.in_msg;
-                    if (inMsg && inMsg.decoded_op_name === "text_comment") {
-                        const comment = inMsg.decoded_body?.text || "";
-                        if (comment.startsWith("egosphere:")) {
-                            const parts = comment.split(":");
-                            if (parts.length >= 6) {
-                                const timestamp = tx.utime;
-                                const elapsed = Math.floor(Date.now() / 1000) - timestamp;
-                                
-                                const baseSize = parseFloat(parts[3]);
-                                const decayIntervals = elapsed / (3 * 3600); // 5% каждые 3 часа
-                                const currentSize = baseSize * Math.pow(0.95, decayIntervals);
-
-                                if (currentSize > 5) { // Если точка еще жива
-                                    parsedDots.push({
-                                        x: parseFloat(parts[1]),
-                                        y: parseFloat(parts[2]),
-                                        size: currentSize,
-                                        color: parts[4],
-                                        text: parts.slice(5).join(":").substring(0, 30), // Обрезаем текст
-                                        username: inMsg.source?.address ? inMsg.source.address.slice(0, 6) + "..." : "Анон"
-                                    });
-                                }
-                            }
-                        }
-                    }
-                });
-
-                dots = parsedDots.reverse(); 
-                draw();
-
-            } catch (err) {
-                console.error("Ошибка загрузки данных из TON:", err);
-                tg.showAlert("Ошибка загрузки данных из блокчейна. Возможно, TON API временно недоступен.");
-            }
+      // 5) Попытка инициализации TonConnectUI (если удаётся)
+      try {
+        if(window.TONConnectUI){
+          const ui = new window.TONConnectUI.TonConnectUI({ manifestUrl: location.href + 'manifest.json', buttonRootId: 'log' });
+          LOG('Инициализация TonConnectUI OK', 'ok');
+        } else {
+          LOG('TonConnectUI отсутствует — пропускаем инициализацию', 'err');
         }
+      } catch(e){
+        LOG('Ошибка при init TonConnectUI: ' + e.message, 'err');
+      }
 
-        // Отрисовка карты 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const w = canvas.width;
-            const h = canvas.height;
-
-            ctx.strokeStyle = "rgba(139, 92, 246, 0.05)";
-            for (let i = 0; i < w; i += 30) {
-                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i); ctx.stroke();
-            }
-
-            dots.forEach(dot => {
-                const x = w/2 + dot.x * (w / 2.2);
-                const y = h/2 + dot.y * (h / 2.2);
-                
-                let grad = ctx.createRadialGradient(x, y, 2, x, y, dot.size);
-                grad.addColorStop(0, dot.color);
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-                
-                ctx.fillStyle = grad;
-                ctx.beginPath(); ctx.arc(x, y, dot.size * 1.5, 0, Math.PI * 2); ctx.fill();
-
-                ctx.fillStyle = '#fff';
-                ctx.font = '9px monospace';
-                ctx.fillText(dot.username, x - 15, y - dot.size - 2);
-                ctx.fillText(dot.text, x - 20, y + dot.size + 8);
-            });
-
-            if (selectedCoords) {
-                ctx.strokeStyle = '#22c55e';
-                ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.arc(selectedCoords.x, selectedCoords.y, 15, 0, Math.PI * 2); ctx.stroke();
-            }
-        }
-
-        // Клик по карте
-        canvas.addEventListener('click', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            selectedCoords = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-            document.getElementById('controlPanel').classList.remove('hidden');
-            draw();
-        });
-
-        // Отправка платежа (На твой кошелек, с комментарием!)
-        async function sendPayment() {
-            if (!tonConnectUI.connected) {
-                tg.showAlert("Пожалуйста, сначала подключи кошелек через кнопку сверху!");
-                return;
-            }
-            if (!selectedCoords) return;
-
-            const w = canvas.width;
-            const h = canvas.height;
-            const x_rel = ((selectedCoords.x - w/2) / (w / 2.2)).toFixed(3);
-            const y_rel = ((selectedCoords.y - h/2) / (h / 2.2)).toFixed(3);
-            const size = document.getElementById('dotSize').value;
-            const color = document.getElementById('dotColor').value;
-            const text = document.getElementById('dotText').value || "Я здесь!";
-            
-            const priceInTon = (parseFloat(size) * 0.002); // 0.002 TON за 1 ед. размера
-            
-            // Комментарий с данными точки
-            const comment = `egosphere:${x_rel}:${y_rel}:${size}:${color}:${text}`;
-
-            const transaction = {
-                validUntil: Math.floor(Date.now() / 1000) + 360,
-                messages: [
-                    {
-                        address: MY_OWNER_WALLET_ADDRESS, // Платеж идет напрямую на ТВОЙ кошелек!
-                        amount: (priceInTon * 1000000000).toString(), // перевод в NanoTON
-                        payload: btoa(comment) // Комментарий в Base64
-                    }
-                ]
-            };
-
-            try {
-                await tonConnectUI.sendTransaction(transaction);
-                tg.showAlert("Успех! Твоя точка появится на карте, как только транзакция подтвердится в блокчейне.");
-                document.getElementById('controlPanel').classList.add('hidden');
-                selectedCoords = null;
-                // Не сразу обновляем карту, ждем подтверждения
-                setTimeout(loadBlockchainData, 15000); 
-            } catch (e) {
-                console.error("Ошибка при отправке транзакции:", e);
-                tg.showAlert("Ошибка при отправке транзакции. Проверьте баланс и соединение.");
-            }
-        }
-
-        // Запуск
-        canvas.width = canvas.clientWidth;
-        canvas.height = canvas.clientHeight;
-        loadBlockchainData();
-        setInterval(loadBlockchainData, 20000); // Обновлять карту каждые 20 сек
-    </script>
+      // 6) Финал
+      LOG('DEBUG завершён. Если есть ошибки выше — пришли скрин консоли/страницы.', (document.querySelectorAll('.err').length ? 'err' : 'ok'));
+    })();
+  </script>
 </body>
 </html>
