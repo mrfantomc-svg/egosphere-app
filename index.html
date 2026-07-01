@@ -1,82 +1,311 @@
 <!doctype html>
-<html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>EGOSPHERE DEBUG</title>
-  <style>
-    body{background:#0b0f19;color:#fff;font-family:Arial,sans-serif;padding:16px}
-    .ok{color:#7CFF9A} .err{color:#FF7C7C} pre{background:#0f1320;padding:12px;border-radius:8px;overflow:auto}
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Эго‑Сфера — Mini App</title>
+<link rel="icon" href="data:;base64,iVBORw0KGgo=">
+<style>
+  :root{--bg:#0b0f19;--panel:#0f1520;--accent:#a855f7;--muted:#9ca3af}
+  body{margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:#fff}
+  .wrap{max-width:980px;margin:18px auto;padding:12px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  h1{font-size:14px;color:var(--accent);letter-spacing:1px;margin:0}
+  #ton-connect-button{min-width:120px}
+  .canvas-wrap{margin-top:26px;display:flex;justify-content:center}
+  canvas{width:520px;height:360px;background:radial-gradient(circle,#141622,#0b0f19);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.6)}
+  .panel{margin-top:18px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:12px;border-radius:10px;border:1px solid rgba(168,85,247,0.08)}
+  .row{display:flex;gap:8px;align-items:center}
+  input[type="text"]{flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:#0b0f19;color:#fff}
+  button{background:var(--accent);border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}
+  .muted{color:var(--muted);font-size:13px}
+  #log{margin-top:12px;font-family:monospace;font-size:12px;color:#ddd;line-height:1.4;max-height:220px;overflow:auto;padding:8px;border-radius:8px;background:#071019;border:1px solid rgba(255,255,255,0.02)}
+</style>
 </head>
 <body>
-  <h2>EGOSPHERE — DEBUG MODE</h2>
-  <div id="log"></div>
+  <div class="wrap">
+    <header>
+      <div><h1>ЭГО‑СФЕРА</h1><div class="muted">Telegram Mini App — тест</div></div>
+      <div id="ton-connect-button"></div>
+    </header>
 
-  <script>
-    const LOG = (t, cls='')=>{
-      const el = document.createElement('div'); el.innerHTML = `<b>${new Date().toISOString()}</b> — ${t}`;
-      if(cls) el.className = cls;
-      document.getElementById('log').appendChild(el);
-      console.log(t);
-    };
+    <div class="canvas-wrap">
+      <canvas id="sphereCanvas"></canvas>
+    </div>
 
-    (async function runDebug(){
-      LOG('1) Скрипт загружен');
+    <div class="panel" id="controlPanel" style="display:none">
+      <div style="font-weight:700;margin-bottom:8px;color:var(--accent)">Захватить место</div>
+      <div class="row">
+        <input id="dotText" type="text" placeholder="Текст (макс 30)" maxlength="30">
+        <input id="dotColor" type="color" value="#a855f7" style="width:44px;height:36px;border-radius:8px;padding:2px;border:none">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+        <label class="muted">Размер:</label>
+        <input id="dotSize" type="range" min="10" max="40" value="20">
+        <div id="priceLabel" style="margin-left:auto;color:#fff">0.040 TON</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="payBtn">Оплатить и опубликовать</button>
+        <button id="manualBtn" style="background:#374151">Инструкция (если нет Wallet)</button>
+      </div>
+    </div>
 
-      // 2) Проверим, что ты вставил адрес кошелька корректно
-      const WAL = "UQCU-ZQzluQ1Vb0JNVnvTpgsHfFpFEafqC8uWN70P-FL5-eC"; // <- убедись, что это твой адрес
-      if(!WAL || WAL.length < 10){
-        LOG('Ошибка: MY_OWNER_WALLET_ADDRESS не задан или слишком короткий', 'err'); return;
+    <div id="log" aria-live="polite"></div>
+  </div>
+
+<script>
+/*
+  Готовый index.html для вставки.
+  Важно: замените значение MY_OWNER_WALLET_ADDRESS на ваш адрес (UQ... или EQ...).
+*/
+const LOG = (t, cls='') => {
+  const el = document.createElement('div'); el.textContent = `[${new Date().toLocaleTimeString()}] ${t}`;
+  if(cls==='err') el.style.color = '#ff8b8b';
+  document.getElementById('log').prepend(el);
+  console.log(t);
+};
+
+// === Замените здесь на адрес вашего кошелька (testnet либо mainnet) ===
+const MY_OWNER_WALLET_ADDRESS = "REPLACE_WITH_YOUR_WALLET_ADDRESS";
+// =====================================================================
+if(MY_OWNER_WALLET_ADDRESS.startsWith('REPLACE')) {
+  LOG('⚠️ ВАЖНО: замените MY_OWNER_WALLET_ADDRESS в файле index.html на ваш адрес (UQ... или EQ...).', 'err');
+}
+
+let tonConnectUI = null; // будет инициализирован
+let connectedAccount = null;
+
+// Надежная загрузка TonConnect UI
+async function ensureTonConnectUI() {
+  const getGlobal = () => window.TonConnectUI || window.TONConnectUI || window.tonconnect || window.tonConnectUI || null;
+  let Lib = getGlobal();
+  if (Lib) return Lib;
+
+  const url = 'https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js';
+  try {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = url;
+      s.onload = res;
+      s.onerror = () => rej(new Error('failed to load ' + url));
+      document.head.appendChild(s);
+    });
+    await new Promise(r => setTimeout(r, 250));
+    Lib = getGlobal();
+    return Lib;
+  } catch (e) {
+    LOG('Не удалось загрузить tonconnect-ui: ' + e.message, 'err');
+    return null;
+  }
+}
+
+// Инициализация TonConnect (и отрисовка кнопки)
+async function initTonConnect() {
+  const Lib = await ensureTonConnectUI();
+  if (!Lib) {
+    LOG('TonConnect UI не доступен — кнопка подключения не будет показана.', 'err');
+    return;
+  }
+  const TonCtor = Lib.TonConnectUI || Lib.default || Lib;
+  try {
+    tonConnectUI = new (TonCtor.TonConnectUI ? TonCtor.TonConnectUI : TonCtor)({
+      manifestUrl: location.origin + '/tonconnect-manifest.json',
+      buttonRootId: 'ton-connect-button'
+    });
+    LOG('TonConnect UI инициализирован.');
+    // подписка на события подключения
+    if(tonConnectUI.on) {
+      tonConnectUI.on('connect', (payload) => {
+        LOG('Кошелек подключен: ' + (payload.account?.address || JSON.stringify(payload)));
+        connectedAccount = payload.account?.address || null;
+      });
+    }
+  } catch (e) {
+    LOG('Ошибка инициализации TonConnect: ' + e.message, 'err');
+  }
+}
+
+// --- Карта и визуализация (простая) ---
+const canvas = document.getElementById('sphereCanvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  draw();
+}
+window.addEventListener('resize', resize);
+setTimeout(resize, 100);
+
+// массив точек
+let dots = [];
+function draw() {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  // фоновая сетка
+  ctx.strokeStyle = 'rgba(168,85,247,0.03)';
+  for(let i=0;i<w;i+=30){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,h);ctx.stroke();}
+  for(let i=0;i<h;i+=30){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(w,i);ctx.stroke();}
+
+  // точки
+  dots.forEach(d=>{
+    const x = w/2 + d.x * (w/2.2);
+    const y = h/2 + d.y * (h/2.2);
+    const size = Math.max(4, d.size);
+    const grad = ctx.createRadialGradient(x,y,2,x,y,size*1.6);
+    grad.addColorStop(0,d.color); grad.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x,y,size*1.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = '9px monospace';
+    ctx.fillText(d.username || 'Anon', x-15, y- size - 4);
+    ctx.fillText(d.text || '', x-20, y + size + 10);
+  });
+}
+
+// Парсинг комментария формата: egosphere:x:y:size:color:text
+function parseComment(comment, utime, fromAddress) {
+  try {
+    if(!comment.startsWith('egosphere:')) return null;
+    const parts = comment.split(':');
+    if(parts.length < 6) return null;
+    const x = parseFloat(parts[1]);
+    const y = parseFloat(parts[2]);
+    const size = parseFloat(parts[3]);
+    const color = parts[4];
+    const text = parts.slice(5).join(':').slice(0,30);
+    // Понижаем размер со временем (увядание)
+    const elapsed = Math.max(0, Math.floor(Date.now()/1000) - (utime||0));
+    const decayIntervals = elapsed / (3*3600);
+    const currentSize = size * Math.pow(0.95, decayIntervals);
+    if(currentSize < 5) return null;
+    return {x,y,size:currentSize,color,text,username: fromAddress ? fromAddress.slice(0,6)+'...' : 'Анон'};
+  } catch(e) { return null; }
+}
+
+// Загрузка транзакций с TON API (testnet)
+async function loadBlockchainData() {
+  if(MY_OWNER_WALLET_ADDRESS.startsWith('REPLACE')) { LOG('Отмена: адрес кошелька не задан.'); return; }
+  const apiURL = `https://testnet.tonapi.io/v2/blockchain/accounts/${MY_OWNER_WALLET_ADDRESS}/transactions?limit=200`;
+  LOG('Запрос транзакций: ' + apiURL);
+  try {
+    const r = await fetch(apiURL);
+    if(!r.ok) { LOG('TON API ответил с ошибкой: ' + r.status, 'err'); return; }
+    const json = await r.json();
+    const parsed = [];
+    (json.transactions||[]).forEach(tx=>{
+      const inMsg = tx.in_msg;
+      if(!inMsg) return;
+      // some providers decode text_comment into decoded_body
+      const comment = (inMsg.decoded_body && inMsg.decoded_body.text) || (inMsg.msg_data && inMsg.msg_data.text) || null;
+      // try also reading from in_msg.msg_data?.boc - (we ignore heavy parsing here)
+      if(comment) {
+        const p = parseComment(comment, tx.utime, inMsg.source?.address);
+        if(p) parsed.push(p);
       }
-      LOG('2) WAL address looks ok: ' + WAL);
+    });
+    dots = parsed.reverse();
+    draw();
+    LOG('Загружено точек: ' + dots.length);
+  } catch(e) {
+    LOG('Ошибка при запросе TON API: ' + e.message, 'err');
+  }
+}
 
-      // 3) Проверим доступ к TON API (simple GET)
-      const apiURL = `https://testnet.tonapi.io/v2/blockchain/accounts/${WAL}/transactions?limit=3`;
-      LOG('3) Попытка fetch -> ' + apiURL);
-      try{
-        const r = await fetch(apiURL);
-        LOG('fetch status: ' + r.status + ' ('+ r.statusText +')');
-        const json = await r.json();
-        LOG('fetch ok, transactions length: ' + (json.transactions ? json.transactions.length : 'no field'));
-        const pretty = document.createElement('pre'); pretty.textContent = JSON.stringify(json.transactions ? json.transactions.slice(0,3) : json, null, 2);
-        document.getElementById('log').appendChild(pretty);
-      }catch(e){
-        LOG('Ошибка fetch к TON API: ' + e.message, 'err');
+// --- UI: выбор точки и оплата ---
+let selectedCoords = null;
+canvas.addEventListener('click', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  selectedCoords = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  document.getElementById('controlPanel').style.display = 'block';
+});
+
+const dotSizeInput = document.getElementById('dotSize');
+const priceLabel = document.getElementById('priceLabel');
+dotSizeInput.addEventListener('input', ()=> {
+  const size = parseFloat(dotSizeInput.value);
+  priceLabel.textContent = (size * 0.002).toFixed(3) + ' TON';
+});
+document.getElementById('manualBtn').addEventListener('click', ()=>{
+  alert('Если у вас нет Wallet/TonConnect: откройте ваш кошелек и отправьте на адрес \\n' + MY_OWNER_WALLET_ADDRESS + '\\nкомментарий формата:\\negosphere:x:y:size:color:text\\n(пример): egosphere:0.0:0.0:20:#a855f7:Тест');
+});
+
+// Подготовка данных из координат canvas -> относительные -1..1
+function coordsToRel(pt) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  return {
+    x: ((pt.x - w/2) / (w/2.2)).toFixed(3),
+    y: ((pt.y - h/2) / (h/2.2)).toFixed(3)
+  };
+}
+
+// Отправка транзакции через TonConnect
+async function sendPaymentViaTonConnect() {
+  if(!tonConnectUI) { LOG('TonConnect не инициализирован', 'err'); alert('TonConnect не доступен'); return; }
+  if(!selectedCoords) { alert('Выберите место на карте кликом'); return; }
+
+  const rel = coordsToRel(selectedCoords);
+  const size = document.getElementById('dotSize').value;
+  const color = document.getElementById('dotColor').value;
+  const text = document.getElementById('dotText').value || 'Я здесь!';
+  const comment = `egosphere:${rel.x}:${rel.y}:${size}:${color}:${text}`;
+
+  const nano = Math.round(parseFloat(size) * 0.002 * 1e9).toString();
+
+  const tx = {
+    validUntil: Math.floor(Date.now()/1000) + 600,
+    messages: [
+      {
+        address: MY_OWNER_WALLET_ADDRESS,
+        amount: nano,
+        payload: btoa(comment)
       }
+    ]
+  };
 
-      // 4) Проверим наличие TonConnectUI (скрипт внешней библиотеки)
-      LOG('4) Проверяем window.TONConnectUI...');
-      if(window.TONConnectUI){
-        LOG('TONConnectUI найден', 'ok');
-      } else {
-        LOG('TONConnectUI НЕ найден. Попытаемся загрузить скрипт динамически.', 'err');
-        try {
-          await new Promise((res, rej)=>{
-            const s = document.createElement('script');
-            s.src = 'https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js';
-            s.onload = ()=>{ LOG('Динамически загружен tonconnect-ui', 'ok'); res(); };
-            s.onerror = ()=>{ LOG('Не удалось загрузить tonconnect-ui (network/CSP?)', 'err'); rej(); };
-            document.head.appendChild(s);
-          });
-        } catch(e) { LOG('Ошибка при динамической загрузке: ' + e, 'err'); }
-      }
+  try {
+    LOG('Отправка транзакции через TonConnect...');
+    await tonConnectUI.sendTransaction(tx);
+    LOG('Транзакция отправлена. Подождите 15-30 с. Обновите карту.');
+    setTimeout(loadBlockchainData, 16000);
+    document.getElementById('controlPanel').style.display = 'none';
+  } catch(e) {
+    LOG('Ошибка при отправке транзакции: ' + (e.message || e), 'err');
+  }
+}
 
-      // 5) Попытка инициализации TonConnectUI (если удаётся)
-      try {
-        if(window.TONConnectUI){
-          const ui = new window.TONConnectUI.TonConnectUI({ manifestUrl: location.href + 'manifest.json', buttonRootId: 'log' });
-          LOG('Инициализация TonConnectUI OK', 'ok');
-        } else {
-          LOG('TonConnectUI отсутствует — пропускаем инициализацию', 'err');
-        }
-      } catch(e){
-        LOG('Ошибка при init TonConnectUI: ' + e.message, 'err');
-      }
+// Кнопка оплаты
+document.getElementById('payBtn').addEventListener('click', async ()=>{
+  // попробуем TonConnect
+  if(window.tonConnectUI) {
+    await sendPaymentViaTonConnect();
+  } else {
+    // fallback: показать инструкцию для ручной отправки
+    const rel = coordsToRel(selectedCoords);
+    const size = document.getElementById('dotSize').value;
+    const color = document.getElementById('dotColor').value;
+    const text = document.getElementById('dotText').value || 'Я здесь!';
+    const comment = `egosphere:${rel.x}:${rel.y}:${size}:${color}:${text}`;
+    alert('TonConnect не доступен. Скопируйте и отправьте этот комментарий при платеже на кошелек:\\n' + MY_OWNER_WALLET_ADDRESS + '\\n\\nКомментарий:\\n' + comment);
+  }
+});
 
-      // 6) Финал
-      LOG('DEBUG завершён. Если есть ошибки выше — пришли скрин консоли/страницы.', (document.querySelectorAll('.err').length ? 'err' : 'ok'));
-    })();
-  </script>
+// Запуск
+(async function bootstrap(){
+  LOG('Сценарий запущен');
+  await initTonConnect();
+  if(window.tonConnectUI) LOG('Window tonConnectUI: ready');
+  // Если библиотека инициализирована, установим глобальную ссылку
+  if(window.tonConnectUI) tonConnectUI = window.tonConnectUI;
+
+  // Подгружаем начальные данные
+  await loadBlockchainData();
+
+  // автообновление
+  setInterval(loadBlockchainData, 20000);
+})();
+</script>
 </body>
 </html>
